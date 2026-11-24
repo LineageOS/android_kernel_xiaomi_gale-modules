@@ -292,6 +292,11 @@
 	charger_cooler: charger-cooler {
 		compatible = "mediatek,mt6375-charger-cooler";
 		#cooling-cells = <2>;
+		mediatek,charger-current-limits = <
+			3500000 3500000 3500000 3500000 3500000 3500000
+			3400000 3300000 3200000 3100000 3000000 2400000
+			1500000 0
+		>;
 	};
 
 	cpu_power_throttling: cpu_power_throttling {

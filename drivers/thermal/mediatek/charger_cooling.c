@@ -24,7 +24,7 @@ struct charger_cooler_info {
 
 static struct charger_cooler_info charger_cl_data;
 /* < -1 is unlimit, unit is uA. */
-static const int master_charger_state_to_current_limit[CHARGER_STATE_NUM] = {
+static int master_charger_state_to_current_limit[CHARGER_STATE_NUM] = {
 	UNLIMIT_CURRENT_MASK, 5200000, 4600000, 4200000, 3800000, 3400000, 3000000, 2600000, 2200000
 	, 1800000, 1400000, 1000000, 700000, 500000, 0
 };
@@ -247,6 +247,31 @@ static struct attribute_group charger_cooler_attr_group = {
 	.attrs	= charger_cooler_attrs,
 };
 
+static void charger_cooling_parse_dt(struct device *dev, struct device_node *np)
+{
+	u32 limits[CHARGER_STATE_NUM - 1];
+	int count, i;
+
+	count = of_property_count_u32_elems(np, "mediatek,charger-current-limits");
+	if (count == -EINVAL)
+		return;
+
+	if (count != CHARGER_STATE_NUM - 1) {
+		dev_warn(dev, "invalid mediatek,charger-current-limits count %d (expected %d)\n",
+			 count, CHARGER_STATE_NUM - 1);
+		return;
+	}
+
+	if (of_property_read_u32_array(np, "mediatek,charger-current-limits",
+				       limits, CHARGER_STATE_NUM - 1)) {
+		dev_warn(dev, "failed to read mediatek,charger-current-limits\n");
+		return;
+	}
+
+	for (i = 0; i < CHARGER_STATE_NUM - 1; i++)
+		master_charger_state_to_current_limit[i + 1] = limits[i];
+}
+
 static int charger_cooling_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
@@ -259,7 +284,7 @@ static int charger_cooling_probe(struct platform_device *pdev)
 	if (!charger_cdev)
 		return -ENOMEM;
 
-	charger_cdev->pdata = of_device_get_match_data(dev);
+	charger_cooling_parse_dt(dev, np);
 
 	len = (strlen(np->name) > (MAX_CHARGER_COOLER_NAME_LEN - 1)) ?
 		(MAX_CHARGER_COOLER_NAME_LEN - 1) : strlen(np->name);
@@ -294,8 +319,10 @@ static int charger_cooling_probe(struct platform_device *pdev)
 
 	cdev = thermal_of_cooling_device_register(np, charger_cdev->name,
 		charger_cdev, &charger_cooling_ops);
-	if (IS_ERR(cdev))
-		return -EINVAL;
+	if (IS_ERR(cdev)) {
+		sysfs_remove_group(kernel_kobj, &charger_cooler_attr_group);
+		return PTR_ERR(cdev);
+	}
 	charger_cdev->cdev = cdev;
 
 	platform_set_drvdata(pdev, charger_cdev);
@@ -311,6 +338,7 @@ static int charger_cooling_remove(struct platform_device *pdev)
 	charger_cdev = (struct charger_cooling_device *)platform_get_drvdata(pdev);
 
 	thermal_cooling_device_unregister(charger_cdev->cdev);
+	sysfs_remove_group(kernel_kobj, &charger_cooler_attr_group);
 	platform_set_drvdata(pdev, NULL);
 
 	return 0;
